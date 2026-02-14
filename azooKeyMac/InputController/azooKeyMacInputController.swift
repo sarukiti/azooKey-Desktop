@@ -8,6 +8,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     var segmentsManager: SegmentsManager
     private(set) var inputState: InputState = .none
     private var inputLanguage: InputLanguage = .japanese
+    // シフト押下でのみ有効にする一時的な英字入力モードのフラグ
+    private var temporaryEnglishMode: Bool = false
     var liveConversionEnabled: Bool {
         Config.LiveConversion().value
     }
@@ -155,6 +157,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         // ピン留めプロンプトのキャッシュを更新
         self.reloadPinnedPromptsCache()
         self.segmentsManager.activate()
+        // サーバー起動時は常に一時英字モードをクリアする
+        self.temporaryEnglishMode = false
 
         if let client = sender as? IMKTextInput {
             client.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
@@ -174,6 +178,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func deactivateServer(_ sender: Any!) {
+        // サーバー非活性化時にも一時英字モードをリセット
+        self.temporaryEnglishMode = false
         self.segmentsManager.deactivate(flushLearningData: false)
         (NSApplication.shared.delegate as? AppDelegate)?.scheduleLearningDataCommit()
         self.inputState = .none
@@ -198,6 +204,14 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         let text = self.segmentsManager.commitMarkedText(inputState: self.inputState)
         if let client = sender as? IMKTextInput {
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+            if self.temporaryEnglishMode && self.inputLanguage == .english {
+                // 外部確定が来た場合でも日本語へ戻す
+                self.switchInputLanguage(.japanese, client: client)
+                self.temporaryEnglishMode = false
+            }
+        } else {
+            // clientが取得できない場合でもモードだけはリセットしておく
+            self.temporaryEnglishMode = false
         }
         self.inputState = .none
         self.refreshMarkedText()
@@ -225,18 +239,21 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                     self.segmentsManager.stopJapaneseInput()
                     self.refreshCandidateWindow()
                     self.refreshPredictionWindow()
+                    self.temporaryEnglishMode = false
                 }
             } else {
                 // 日本語モードへの切り替え
                 if self.inputLanguage == .english {
                     self.inputLanguage = .japanese
+                    self.temporaryEnglishMode = false
                     let (clientAction, clientActionCallback) = self.inputState.event(
                         eventCore: .init(modifierFlags: [], characters: nil, charactersIgnoringModifiers: nil, keyCode: 0x00),
                         userAction: .かな,
                         inputLanguage: self.inputLanguage,
                         liveConversionEnabled: false,
                         enableDebugWindow: false,
-                        enableSuggestion: false
+                        enableSuggestion: false,
+                        temporaryEnglishMode: self.temporaryEnglishMode
                     )
                     _ = self.handleClientAction(
                         clientAction,
@@ -291,6 +308,20 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
            ) {
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
             return true
+        }
+
+        // シフトキーが押されたら英字モードに移行し、そのまま英字入力を続けられるようにする（macOS標準IMEと同等の簡易仕様）
+        if self.inputLanguage == .japanese,
+           self.segmentsManager.isEmpty,
+           !self.temporaryEnglishMode,
+           event.modifierFlags.contains(.shift),
+           !event.modifierFlags.contains(.command),
+           !event.modifierFlags.contains(.control),
+           !event.modifierFlags.contains(.option),
+           let characters = event.characters,
+           self.isPrintable(characters) {
+            // シフト押下を契機に一時的な英字入力モードへ移行（Enterで確定すると自動で戻る）
+            self.switchInputLanguage(.english, client: client, temporary: true)
         }
 
         let userAction = UserAction.getUserAction(eventCore: event.keyEventCore, inputLanguage: inputLanguage)
@@ -361,7 +392,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             inputLanguage: self.inputLanguage,
             liveConversionEnabled: Config.LiveConversion().value,
             enableDebugWindow: Config.DebugWindow().value,
-            enableSuggestion: aiBackendEnabled
+            enableSuggestion: aiBackendEnabled,
+            temporaryEnglishMode: self.temporaryEnglishMode
         )
         return handleClientAction(clientAction, clientActionCallback: clientActionCallback, client: client)
     }
@@ -550,7 +582,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                 self.replaceSuggestionWindow.orderOut(nil)
             }
             if inputState == .none {
-                self.switchInputLanguage(self.inputLanguage, client: client)
+                if self.temporaryEnglishMode && self.inputLanguage == .english {
+                    // シフト経由の英字モードは確定時に自動で日本語へ戻す
+                    self.switchInputLanguage(.japanese, client: client)
+                    self.temporaryEnglishMode = false
+                } else {
+                    self.switchInputLanguage(self.inputLanguage, client: client)
+                }
             }
             self.inputState = inputState
         case .basedOnBackspace(let ifIsEmpty, let ifIsNotEmpty), .basedOnSubmitCandidate(let ifIsEmpty, let ifIsNotEmpty):
@@ -563,8 +601,10 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         return true
     }
 
-    @MainActor func switchInputLanguage(_ language: InputLanguage, client: IMKTextInput) {
+    @MainActor func switchInputLanguage(_ language: InputLanguage, client: IMKTextInput, temporary: Bool = false) {
         self.inputLanguage = language
+        // temporaryの指定がない通常切替では常に一時モードを解除する
+        self.temporaryEnglishMode = (language == .english) ? temporary : false
         client.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
         switch language {
         case .english:
@@ -575,7 +615,20 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         }
     }
 
+    /// シフト一時英字モードの判定用。英数字・記号・句読点のみからなる文字列か
+    private func isPrintable(_ text: String) -> Bool {
+        let printable: CharacterSet = [.alphanumerics, .symbols, .punctuationCharacters]
+            .reduce(into: CharacterSet()) { $0.formUnion($1) }
+        return !text.isEmpty && CharacterSet(text.unicodeScalars).isSubset(of: printable)
+    }
+
     func refreshCandidateWindow() {
+        if self.temporaryEnglishMode && self.inputLanguage == .english {
+            self.candidatesWindow.setIsVisible(false)
+            self.candidatesWindow.orderOut(nil)
+            self.candidatesViewController.hide()
+            return
+        }
         switch self.segmentsManager.getCurrentCandidateWindow(inputState: self.inputState) {
         case .selecting(let candidates, let selectionIndex):
             var rect: NSRect = .zero
@@ -607,6 +660,10 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     }
 
     func refreshPredictionWindow() {
+        if self.temporaryEnglishMode && self.inputLanguage == .english {
+            self.hidePredictionWindow()
+            return
+        }
         guard self.inputState == .composing else {
             self.hidePredictionWindow()
             return
@@ -760,13 +817,15 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             forStyle: kTSMHiliteConvertedText,
             at: NSRange(location: NSNotFound, length: 0)
         ) as? [NSAttributedString.Key: Any]
+        // 一時的な英字モードでは常に下線を強制して変換中っぽく見せる
+        let forceUnderline = (self.inputLanguage == .english && self.temporaryEnglishMode)
         let text = NSMutableAttributedString(string: "")
         let currentMarkedText = self.segmentsManager.getCurrentMarkedText(inputState: self.inputState)
         for part in currentMarkedText where !part.content.isEmpty {
             let attributes: [NSAttributedString.Key: Any]? = switch part.focus {
             case .focused: highlight
             case .unfocused: underline
-            case .none: [:]
+            case .none: forceUnderline ? underline : [:]
             }
             text.append(
                 NSAttributedString(

@@ -18,7 +18,8 @@ public enum InputState: Sendable, Hashable {
         inputLanguage: InputLanguage,
         liveConversionEnabled: Bool,
         enableDebugWindow: Bool,
-        enableSuggestion: Bool
+        enableSuggestion: Bool,
+        temporaryEnglishMode: Bool = false
     ) -> (ClientAction, ClientActionCallback) {
         if event.modifierFlags.contains(.command) {
             return (.fallthrough, .fallthrough)
@@ -62,8 +63,13 @@ public enum InputState: Sendable, Hashable {
                 case .japanese:
                     return (.appendPieceToMarkedText(string), .transition(.composing))
                 case .english:
-                    // 連結する
-                    return (.insertWithoutMarkedText(string.inputString(preferIntention: true)), .fallthrough)
+                    if temporaryEnglishMode {
+                        // シフト押下で入った一時英字モードでは日本語入力と同様にMarkedTextを使う
+                        return (.appendPieceToMarkedText(string), .transition(.composing))
+                    } else {
+                        // 連結する
+                        return (.insertWithoutMarkedText(string.inputString(preferIntention: true)), .fallthrough)
+                    }
                 }
             case .deadKey(let diacritic):
                 if inputLanguage == .english {
@@ -76,14 +82,21 @@ public enum InputState: Sendable, Hashable {
                 case .japanese:
                     return (.appendPieceToMarkedText([number.inputPiece]), .transition(.composing))
                 case .english:
-                    return (.insertWithoutMarkedText(number.inputString), .fallthrough)
+                    if temporaryEnglishMode {
+                        return (.appendPieceToMarkedText([number.inputPiece]), .transition(.composing))
+                    } else {
+                        return (.insertWithoutMarkedText(number.inputString), .fallthrough)
+                    }
                 }
             case .英数:
                 return (.selectInputLanguage(.english), .fallthrough)
             case .かな:
                 return (.selectInputLanguage(.japanese), .fallthrough)
             case .space(let isFullSpace):
-                if inputLanguage != .english && isFullSpace {
+                if inputLanguage == .english && temporaryEnglishMode {
+                    // 一時英字モードではスペースも下線付き入力に含める
+                    return (.appendPieceToMarkedText([.character(" ")]), .transition(.composing))
+                } else if inputLanguage != .english && isFullSpace {
                     return (.insertWithoutMarkedText("　"), .fallthrough)
                 } else {
                     return (.insertWithoutMarkedText(" "), .fallthrough)
