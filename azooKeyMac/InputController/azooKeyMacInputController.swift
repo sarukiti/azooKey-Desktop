@@ -319,7 +319,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
            !event.modifierFlags.contains(.control),
            !event.modifierFlags.contains(.option),
            let characters = event.characters,
-           self.isPrintable(characters) {
+           self.isASCIILetters(characters) {
             // シフト押下を契機に一時的な英字入力モードへ移行（Enterで確定すると自動で戻る）
             self.switchInputLanguage(.english, client: client, temporary: true)
         }
@@ -582,23 +582,34 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                 self.replaceSuggestionWindow.orderOut(nil)
             }
             if inputState == .none {
-                if self.temporaryEnglishMode && self.inputLanguage == .english {
-                    // シフト経由の英字モードは確定時に自動で日本語へ戻す
-                    self.switchInputLanguage(.japanese, client: client)
-                    self.temporaryEnglishMode = false
-                } else {
-                    self.switchInputLanguage(self.inputLanguage, client: client)
-                }
+                self.restoreInputLanguageAfterComposition(client: client)
             }
             self.inputState = inputState
         case .basedOnBackspace(let ifIsEmpty, let ifIsNotEmpty), .basedOnSubmitCandidate(let ifIsEmpty, let ifIsNotEmpty):
-            self.inputState = self.segmentsManager.isEmpty ? ifIsEmpty : ifIsNotEmpty
+            let nextState = self.segmentsManager.isEmpty ? ifIsEmpty : ifIsNotEmpty
+            // 候補確定やバックスペースで入力が空になった場合も、.transition(.none) と同様に後始末する
+            if nextState == .none && self.inputState != .none {
+                self.replaceSuggestionWindow.orderOut(nil)
+                self.restoreInputLanguageAfterComposition(client: client)
+            }
+            self.inputState = nextState
         }
 
         self.refreshMarkedText()
         self.refreshCandidateWindow()
         self.refreshPredictionWindow()
         return true
+    }
+
+    /// 入力が終わって `.none` に戻るときの言語の後始末
+    @MainActor private func restoreInputLanguageAfterComposition(client: IMKTextInput) {
+        if self.temporaryEnglishMode && self.inputLanguage == .english {
+            // シフト経由の英字モードは確定時に自動で日本語へ戻す
+            self.switchInputLanguage(.japanese, client: client)
+            self.temporaryEnglishMode = false
+        } else {
+            self.switchInputLanguage(self.inputLanguage, client: client)
+        }
     }
 
     @MainActor func switchInputLanguage(_ language: InputLanguage, client: IMKTextInput, temporary: Bool = false) {
@@ -615,11 +626,10 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         }
     }
 
-    /// シフト一時英字モードの判定用。英数字・記号・句読点のみからなる文字列か
-    private func isPrintable(_ text: String) -> Bool {
-        let printable: CharacterSet = [.alphanumerics, .symbols, .punctuationCharacters]
-            .reduce(into: CharacterSet()) { $0.formUnion($1) }
-        return !text.isEmpty && CharacterSet(text.unicodeScalars).isSubset(of: printable)
+    /// シフト一時英字モードの判定用。ASCIIアルファベットのみからなる文字列か
+    /// 記号（Shift+数字など）は日本語入力として全角で扱いたいので対象外にする
+    private func isASCIILetters(_ text: String) -> Bool {
+        !text.isEmpty && text.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) || ("a"..."z").contains($0) }
     }
 
     func refreshCandidateWindow() {
