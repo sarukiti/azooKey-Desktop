@@ -636,12 +636,14 @@ public final class SegmentsManager {
     @MainActor
     public func requestSelectingNextCandidate() {
         self.isFixingAdditionalCandidateTop = false
+        self.shouldShowCandidateWindow = true
         self.selectionIndex = (self.selectionIndex ?? -1) + 1
     }
 
     @MainActor
     public func requestSelectingPrevCandidate() {
         let selectionIndex = self.selectionIndex ?? 0
+        self.shouldShowCandidateWindow = true
 
         if self.isFixingAdditionalCandidateTop && self.isShowingAdditionalCandidates {
             if self.candidateOffsetByAdditionalCandidates < self.additionalCandidates.count {
@@ -818,15 +820,31 @@ public final class SegmentsManager {
         return candidate
     }
 
+    /// F6〜F10などで直接選択できる追加候補の種類。`createAdditionalCandidates`の並び順と一致させる
+    public enum AdditionalCandidateKind: Int, Sendable, CaseIterable {
+        case halfWidthRoman = 0
+        case fullWidthRoman
+        case hankakuKatakana
+        case katakana
+        case hiragana
+    }
+
     @MainActor
     private func createAdditionalCandidates() -> [CandidatePresentation] {
-        let candidates: [(candidate: Candidate, annotationText: String?)] = [
-            (self.getModifiedRomanCandidate(inputState: .selecting) { $0 }, "英数"),
-            (self.getModifiedRomanCandidate(inputState: .selecting) { $0.applyingTransform(.fullwidthToHalfwidth, reverse: true) ?? $0 }, "全角英数"),
-            (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toKatakana().applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? $0 }, "半角カナ"),
-            (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toKatakana() }, "カタカナ"),
-            (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toHiragana() }, "ひらがな")
-        ]
+        let candidates: [(candidate: Candidate, annotationText: String?)] = AdditionalCandidateKind.allCases.map { kind in
+            switch kind {
+            case .halfWidthRoman:
+                (self.getModifiedRomanCandidate(inputState: .selecting) { $0 }, "英数")
+            case .fullWidthRoman:
+                (self.getModifiedRomanCandidate(inputState: .selecting) { $0.applyingTransform(.fullwidthToHalfwidth, reverse: true) ?? $0 }, "全角英数")
+            case .hankakuKatakana:
+                (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toKatakana().applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? $0 }, "半角カナ")
+            case .katakana:
+                (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toKatakana() }, "カタカナ")
+            case .hiragana:
+                (self.getModifiedRubyCandidate(inputState: .selecting) { $0.toHiragana() }, "ひらがな")
+            }
+        }
         return candidates.map {
             .init(
                 candidate: $0.candidate,
@@ -852,6 +870,27 @@ public final class SegmentsManager {
         self.additionalCandidates = candidates
         self.isShowingAdditionalCandidates = true
         self.showingAdditionalCandidateCount = 1
+    }
+
+    /// 追加候補（ひらがな・カタカナ等）を確定せずに選択状態にする。
+    /// 他のIMEのF6〜F10と同様に、変換結果をマークドテキストとして表示し、確定はEnterや次の入力に任せる。
+    @MainActor
+    public func requestSelectingAdditionalCandidate(_ kind: AdditionalCandidateKind) {
+        let alreadySelectingAdditional = self.isShowingAdditionalCandidates
+            && (self.selectionIndex ?? 0) < self.candidateOffsetByAdditionalCandidates
+        if !alreadySelectingAdditional {
+            // 選択中の通常候補（文節）を基準に追加候補を作り直す
+            let rawSelectionIndex = self.selectionIndex.map { $0 - self.candidateOffsetByAdditionalCandidates }
+            self.resetAdditionalCandidates()
+            self.selectionIndex = rawSelectionIndex.map { max(0, $0) }
+            self.showAdditionalCandidatesIfNeeded()
+        }
+        guard self.isShowingAdditionalCandidates, self.additionalCandidates.indices.contains(kind.rawValue) else {
+            return
+        }
+        self.showingAdditionalCandidateCount = self.additionalCandidates.count
+        self.isFixingAdditionalCandidateTop = true
+        self.selectionIndex = kind.rawValue
     }
 
     private func resetAdditionalCandidates() {
