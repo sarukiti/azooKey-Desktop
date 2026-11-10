@@ -158,15 +158,15 @@ public enum InputState: Sendable, Hashable {
             case let .function(function):
                 switch function {
                 case .six:
-                    return (.submitHiraganaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.hiragana), .transition(.selecting))
                 case .seven:
-                    return (.submitKatakanaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.katakana), .transition(.selecting))
                 case .eight:
-                    return (.submitHankakuKatakanaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.hankakuKatakana), .transition(.selecting))
                 case .nine:
-                    return (.submitFullWidthRomanCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.fullWidthRoman), .transition(.selecting))
                 case .ten:
-                    return (.submitHalfWidthRomanCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.halfWidthRoman), .transition(.selecting))
                 }
             case .forget:
                 return (.consume, .fallthrough)
@@ -225,15 +225,15 @@ public enum InputState: Sendable, Hashable {
             case let .function(function):
                 switch function {
                 case .six:
-                    return (.submitHiraganaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.hiragana), .transition(.selecting))
                 case .seven:
-                    return (.submitKatakanaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.katakana), .transition(.selecting))
                 case .eight:
-                    return (.submitHankakuKatakanaCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.hankakuKatakana), .transition(.selecting))
                 case .nine:
-                    return (.submitFullWidthRomanCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.fullWidthRoman), .transition(.selecting))
                 case .ten:
-                    return (.submitHalfWidthRomanCandidate, .transition(.none))
+                    return (.selectAdditionalCandidate(.halfWidthRoman), .transition(.selecting))
                 }
             case .英数:
                 return (.selectInputLanguage(.english), .fallthrough)
@@ -310,15 +310,15 @@ public enum InputState: Sendable, Hashable {
             case let .function(function):
                 switch function {
                 case .six:
-                    return (.submitHiraganaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
+                    return (.selectAdditionalCandidate(.hiragana), .fallthrough)
                 case .seven:
-                    return (.submitKatakanaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
+                    return (.selectAdditionalCandidate(.katakana), .fallthrough)
                 case .eight:
-                    return (.submitHankakuKatakanaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
+                    return (.selectAdditionalCandidate(.hankakuKatakana), .fallthrough)
                 case .nine:
-                    return (.submitFullWidthRomanCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
+                    return (.selectAdditionalCandidate(.fullWidthRoman), .fallthrough)
                 case .ten:
-                    return (.submitHalfWidthRomanCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
+                    return (.selectAdditionalCandidate(.halfWidthRoman), .fallthrough)
                 }
             case .number(let num):
                 switch num {

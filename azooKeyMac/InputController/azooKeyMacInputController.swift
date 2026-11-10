@@ -466,6 +466,15 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             self.submitCandidate(self.segmentsManager.getModifiedRomanCandidate {
                 $0.applyingTransform(.fullwidthToHalfwidth, reverse: false)!
             })
+        case .selectAdditionalCandidate(let kind):
+            if self.inputState != .selecting {
+                // composing / previewing からは変換モードに入ってから選択する
+                self.segmentsManager.insertCompositionSeparator(inputStyle: self.inputStyle, skipUpdate: true)
+                self.segmentsManager.update(requestRichCandidates: true)
+                // 他のIMEと同様、F6〜F10直後は候補ウィンドウを出さずマークドテキストだけ変える
+                self.segmentsManager.requestSetCandidateWindowState(visible: false)
+            }
+            self.segmentsManager.requestSelectingAdditionalCandidate(kind)
         case .enableDebugWindow:
             self.segmentsManager.requestDebugWindowMode(enabled: true)
         case .disableDebugWindow:

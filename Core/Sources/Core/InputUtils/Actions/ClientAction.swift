@@ -47,6 +47,8 @@ public enum ClientAction {
     case submitHankakuKatakanaCandidate
     case submitFullWidthRomanCandidate
     case submitHalfWidthRomanCandidate
+    /// Fnキーでの変換（確定せず、変換結果を選択状態にする）
+    case selectAdditionalCandidate(SegmentsManager.AdditionalCandidateKind)
 
     // PredictiveSuggestion
     case requestPredictiveSuggestion
